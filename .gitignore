@@ -1,3 +1,15 @@
+# IDE
 .vscode/extensions.json
-pico_net_prova.code-workspace
 .vscode/settings.json
+pico_net_prova.code-workspace
+
+# Credenziali
+mqtt_config.py
+secrets.txt
+
+# Temp e cache
+logs/
+__pycache__/
+.claude/
+.mypy_cache/
+.micropico
