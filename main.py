@@ -3,7 +3,6 @@ import network
 import time
 import ujson
 import webrepl
-import _thread
 from machine import Pin, I2C
 from time import sleep
 from umqtt.simple import MQTTClient
@@ -99,54 +98,51 @@ def _build_discovery_configs():
     ]
 
 
-def publish_loop(led, i2c, aht20_ok, ups_uart):
-    """Loop di publish su thread separato — non blocca la REPL."""
+def publish_once(led, i2c, aht20_ok, ups_uart):
+    """Legge sensori e pubblica MQTT una volta."""
     import gc
-    while True:
-        gc.collect()
+    gc.collect()
 
-        # Lettura sensori
-        temp, hum = None, None
-        if aht20_ok:
-            try:
-                temp, hum = read_aht20(i2c)
-                print(f"Temp: {temp:.1f}C  Umidita: {hum:.1f}%")
-            except OSError as e:
-                print(f"Errore lettura sensore: {e}")
+    # Lettura sensori
+    temp, hum = None, None
+    if aht20_ok:
+        try:
+            temp, hum = read_aht20(i2c)
+            print(f"Temp: {temp:.1f}C  Umidita: {hum:.1f}%")
+        except OSError as e:
+            print(f"Errore lettura sensore: {e}")
 
-        ups_data = read_ups(ups_uart)
-        if ups_data:
-            print(f"UPS: {ups_data[0]:.2f}V  {ups_data[1]:.1f}mA")
-        else:
-            print("UPS: nessun dato")
+    ups_data = read_ups(ups_uart)
+    if ups_data:
+        print(f"UPS: {ups_data[0]:.2f}V  {ups_data[1]:.1f}mA")
+    else:
+        print("UPS: nessun dato")
 
-        # Publish MQTT
-        if temp is not None:
-            try:
-                client = mqtt_connect()
-                data = {
-                    "temperature": round(temp, 1),
-                    "humidity": round(hum, 1),
-                }
-                if ups_data:
-                    data["battery_voltage"] = round(ups_data[0], 2)
-                    data["battery_current"] = round(ups_data[1], 1)
-                payload = ujson.dumps(data)
-                led.on()
-                client.publish(STATE_TOPIC, payload)
-                sleep(0.3)
-                led.off()
-                sleep(0.2)
-                led.on()
-                sleep(0.3)
-                led.off()
-                client.disconnect()
-                print(f"MQTT pubblicato: {payload}")
-            except Exception as e:
-                print(f"Errore MQTT: {e}")
-                led.off()
-
-        time.sleep(PUBLISH_INTERVAL)
+    # Publish MQTT
+    if temp is not None:
+        try:
+            client = mqtt_connect()
+            data = {
+                "temperature": round(temp, 1),
+                "humidity": round(hum, 1),
+            }
+            if ups_data:
+                data["battery_voltage"] = round(ups_data[0], 2)
+                data["battery_current"] = round(ups_data[1], 1)
+            payload = ujson.dumps(data)
+            led.on()
+            client.publish(STATE_TOPIC, payload)
+            sleep(0.3)
+            led.off()
+            sleep(0.2)
+            led.on()
+            sleep(0.3)
+            led.off()
+            client.disconnect()
+            print(f"MQTT pubblicato: {payload}")
+        except Exception as e:
+            print(f"Errore MQTT: {e}")
+            led.off()
 
 
 # --- Main ---
@@ -216,10 +212,14 @@ def main():
         time.sleep(0.5)
     print(f"Discovery pubblicato ({len(discovery_configs)} entita)")
 
-    # 4. Avvia publish loop su thread separato
-    _thread.start_new_thread(publish_loop, (led, i2c, aht20_ok, ups_uart))
-    print(f"Publish thread avviato (ogni {PUBLISH_INTERVAL}s)")
-    print("REPL libera — WebREPL disponibile")
+    # 4. Primo publish immediato
+    publish_once(led, i2c, aht20_ok, ups_uart)
+
+    # 5. Loop con soft sleep — WebREPL resta attivo
+    print(f"Loop publish ogni {PUBLISH_INTERVAL}s")
+    while True:
+        time.sleep(PUBLISH_INTERVAL)
+        publish_once(led, i2c, aht20_ok, ups_uart)
 
 
 if __name__ == "__main__":
